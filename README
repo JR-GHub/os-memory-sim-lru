@@ -1,0 +1,202 @@
+# CS4760 Assignment 6 — Memory Management with LRU
+
+**Author:** Jerome Ramey Jr  
+**Date:** May 2025
+
+---
+
+## Table of Contents
+1. [Overview](#overview)  
+2. [Features](#features)  
+3. [Requirements](#requirements)  
+4. [Build & Installation](#build--installation)  
+5. [Usage](#usage)  
+6. [Command-Line Options](#command-line-options)  
+7. [Logging & Output](#logging--output)  
+8. [Memory Layout Display](#memory-layout-display)  
+9. [Data Structures](#data-structures)  
+10. [Page Replacement Policy](#page-replacement-policy)  
+11. [Inter-Process Communication (IPC)](#inter-process-communication-ipc)  
+12. [Statistics & Metrics](#statistics--metrics)  
+13. [Termination Criteria](#termination-criteria)  
+14. [Resource Cleanup](#resource-cleanup)  
+15. [File Overview](#file-overview)  
+16. [License](#license)  
+
+---
+
+## Overview
+This project implements an **Operating System Simulator** (`oss`) that manages memory requests from forked user processes via message queues, using a **Least Recently Used (LRU)** page replacement algorithm with dirty-bit optimization. It simulates paging, page faults, disk I/O delays, and logs all activity to both console and a logfile.
+
+---
+
+## Features
+- **LRU page replacement** with timestamps from a simulated clock (seconds + nanoseconds).  
+- **Dirty-bit optimization**: clean vs. dirty swaps incur 10 ms vs. 14 ms simulated disk delay.  
+- **Fixed memory space**: 128 KB total, 1 KB pages ⇒ 32 pages/process, 256 frames.  
+- **Configurable concurrency**: up to 18 simultaneous user processes.  
+- **FIFO process scheduling**—no CPU scheduling beyond blocking on page faults.  
+- **Disk I/O queue**: pending page-fault requests are serviced one at a time, with simulated delays.  
+- **Periodic dumps** of frame table and per-process page tables every simulated second.  
+- **Comprehensive logging** to console + logfile (memory requests, page faults, swaps, terminations).  
+
+---
+
+## Requirements
+- UNIX-like OS (Linux/macOS)  
+- GCC (or compatible C compiler)  
+- POSIX IPC (shared memory, message queues)  
+- `make`, `bash`  
+
+---
+
+## Build & Installation
+```bash
+# In project root (username.6/)
+make        # builds `oss` and `user_proc`
+
+To clean:
+
+make clean
+
+
+
+⸻
+
+Usage
+
+./oss -n <total_procs> -s <max_simultaneous> -i <interval_ms> -f <logfile>
+
+	•	Spawns up to <total_procs> user processes (hard-capped at 100).
+	•	Allows at most <max_simultaneous> concurrent processes (hard-capped at 18).
+	•	Waits <interval_ms> between spawn attempts.
+	•	Logs all oss activity to <logfile> and to stdout.
+
+  EXAMPLE: ./oss -n 20 -s 5 -i 100 -f logfile.txt
+
+⸻
+
+Command-Line Options
+
+Flag	Arg	Default	Description
+-h	—	—	Show help/usage and exit.
+-n	<#processes>	—	Total number of processes to spawn (≤ 100).
+-s	<#simultaneous>	—	Max concurrent processes (≤ 18).
+-i	<ms>	100	Interval (ms) between spawn attempts.
+-f	<logfile>	—	(Required) Path to log file.
+
+
+
+⸻
+
+Logging & Output
+
+Every event is logged as:
+
+oss: <EventType> <ProcessID> <Details> at time <sec>:<nsec>
+
+	•	Page hits:
+oss: P2 read hit page 13 in frame 1 at 0:34000000
+	•	Page faults:
+oss: Page fault P2 page 3 queued for frame 5 at 1:100
+	•	Swap completions:
+oss: Completed swap for P2 page 3 into frame 5 at 1:14000100
+	•	Writes/Dirty:
+Dirty-bit set on write; extra swap time logged accordingly.
+	•	Terminations:
+oss: P2 terminating at 3:50000000, runtime 2:40
+
+All oss logs go to both stdout and the specified logfile. user_proc logs (if any) appear only on stdout.
+
+⸻
+
+Memory Layout Display
+
+Once per simulated second, prints:
+
+Current memory layout at time <sec>:<nsec>:
+Frame | Occ | Dirty | PID | Page | LastRef
+------|-----|-------|-----|------|----------
+  0   |  No |   0   |  -  |  -   | 0:0
+  1   |  Yes|   1   | P3  |  4   | 1:52000000
+...
+P0 page table: [ -1 -1  5 12  7 … ]
+P1 page table: [  2  3 -1 -1 15 … ]
+
+	•	Occ: occupied flag
+	•	Dirty: 1 if written, 0 otherwise
+	•	LastRef: timestamp of last access
+
+⸻
+
+Data Structures
+	•	frame_t (frame table entry):
+	•	occupied, dirty, pid, page_number
+	•	last_ref_sec, last_ref_ns for LRU
+	•	pcb_t (process control block):
+	•	occupied, pid, start_sec, start_ns
+	•	page_table[32] mapping virtual→physical or -1
+	•	Page Table: array of 32 ints per process
+
+⸻
+
+Page Replacement Policy
+	•	LRU: evict frame with oldest last_ref.
+	•	Dirty-bit:
+	•	Clean swap: 10 ms simulated delay
+	•	Dirty swap: 14 ms simulated delay
+
+⸻
+
+Inter-Process Communication (IPC)
+	•	Shared Memory: system clock (sec + ns).
+	•	Message Queues:
+	•	User→oss: (pid, address, op)
+	•	oss→User: (pid, frame_no, op)
+	•	Blocking: on page fault, user waits until swap completion.
+
+⸻
+
+Statistics & Metrics
+	•	Memory accesses/sec (reported on exit)
+	•	Page fault ratio (faults/access)
+	•	Effective access time per process (incl. swap delays)
+
+⸻
+
+Termination Criteria
+	•	Stop spawning after -n or after 5 real seconds.
+	•	Finish when no active children & empty disk queue.
+	•	Signal handling (SIGINT, SIGALRM) triggers graceful cleanup.
+
+⸻
+
+Resource Cleanup
+
+On exit, oss removes:
+	•	Shared memory segment
+	•	Message queue
+	•	Frees disk request nodes
+	•	Closes log file
+
+⸻
+
+File Overview
+
+File	Purpose
+oss.c	Main OS simulator
+user_proc.c	Child process memory request generator
+ipc.h	Message queue structures & constants
+oss.h	Global constants, pcb_t, frame_t definitions
+clock.c / .h	Shared-memory clock management
+frame_table.c / .h	Frame table & LRU eviction logic
+page_table.c / .h	Virtual→physical page mapping
+utils.c / .h	Logging, randomness, and table-printing helpers
+Makefile	Build & clean rules
+README.md	Project documentation
+
+
+
+⸻
+
+
